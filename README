@@ -1,0 +1,32 @@
+cpudl-bench - Modules to benchmark heap operations in kernel/sched/cpudeadline.c
+              by Tommaso Cucinotta <tommaso.cucinotta@sssup.it>
+
+This project compiles into a set of modules that benchmark heap operations
+in kernel/sched/cpudeadline.c. Each benchmarking module contains a copy of
+some version of the cpudeadline.c source, after a few modifications as
+described below.
+
+Applied changes are:
+1. change all identifiers prefixes from cpudl_ to mycpudl_ (to avoid conflicts
+   with in-kernel identifiers)
+2. skip the cpu_present() check wherever present (to allow for benchmarking
+   with more CPUs than actually present in the system)
+3. add nr_cpu_ids as explicit param at init time, and replace call to
+   for_each_possible_cpu() with a for(i = 0; i < nr_cpu_ids; i++)
+4. cpudeadline wraparound bugfix (*-bugfix*.c versions)
+5. cpudeadline wraparound bugfix + speed-up patch (*-bugfix-fast-*.c versions)
+6. additional printk() and dump of the whole heap status after each operation,
+   for debugging purposes
+
+The actual benchmarking is done by the cpudl_bench.c module, which:
+a. initializes the mycpudl_* module with a number of CPUs as from the num_cpus
+   module param
+b. performs a number of insert and delete operations on the heap, as from the
+   num_ops module param
+c. computes the duration of each operation in cycles via the rdtsc, and stores
+   each value in a pre-allocated in-memory array
+d. at the end of the num_ops measurements, dumps the whole content of the
+   array via printk().
+
+Due to the last step, the module needs a large in-kernel ring buffer, if a large
+num_ops module param is used.
