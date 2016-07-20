@@ -1,5 +1,5 @@
 /*
- *  kernel/sched/mycpudl.c
+ *  kernel/sched/cpudl.c
  *
  *  Global CPU deadline management
  *
@@ -14,7 +14,7 @@
 #include <linux/gfp.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
-#include "mycpudeadline.h"
+#include "cpudeadline.h"
 
 static inline int parent(int i)
 {
@@ -31,7 +31,7 @@ static inline int right_child(int i)
 	return (i << 1) + 2;
 }
 
-static void mycpudl_exchange(struct mycpudl *cp, int a, int b)
+static void cpudl_exchange(struct cpudl *cp, int a, int b)
 {
 	int cpu_a = cp->elements[a].cpu, cpu_b = cp->elements[b].cpu;
 
@@ -41,7 +41,7 @@ static void mycpudl_exchange(struct mycpudl *cp, int a, int b)
 	swap(cp->elements[cpu_a].idx, cp->elements[cpu_b].idx);
 }
 
-static void mycpudl_heapify_down(struct mycpudl *cp, int idx)
+static void cpudl_heapify_down(struct cpudl *cp, int idx)
 {
 	int l, r, largest;
 
@@ -61,47 +61,47 @@ static void mycpudl_heapify_down(struct mycpudl *cp, int idx)
 			break;
 
 		/* Push idx down the heap one level and bump one up */
-		mycpudl_exchange(cp, largest, idx);
+		cpudl_exchange(cp, largest, idx);
 		idx = largest;
 	}
 }
 
-static void mycpudl_heapify_up(struct mycpudl *cp, int idx)
+static void cpudl_heapify_up(struct cpudl *cp, int idx)
 {
 	while (idx > 0 && dl_time_before(cp->elements[parent(idx)].dl,
 			cp->elements[idx].dl)) {
-		mycpudl_exchange(cp, idx, parent(idx));
+		cpudl_exchange(cp, idx, parent(idx));
 		idx = parent(idx);
 	}
 }
 
-static void mycpudl_change_key(struct mycpudl *cp, int idx, u64 new_dl)
+static void cpudl_change_key(struct cpudl *cp, int idx, u64 new_dl)
 {
-	WARN_ON(idx == IDX_INVALID);
+	WARN_ON(idx == IDX_INVALID || !cpu_present(idx));
 
 	if (dl_time_before(new_dl, cp->elements[idx].dl)) {
 		cp->elements[idx].dl = new_dl;
-		mycpudl_heapify_down(cp, idx);
+		cpudl_heapify_down(cp, idx);
 	} else {
 		cp->elements[idx].dl = new_dl;
-		mycpudl_heapify_up(cp, idx);
+		cpudl_heapify_up(cp, idx);
 	}
 }
 
-static inline int mycpudl_maximum(struct mycpudl *cp)
+static inline int cpudl_maximum(struct cpudl *cp)
 {
 	return cp->elements[0].cpu;
 }
 
 /*
- * mycpudl_find - find the best (later-dl) CPU in the system
- * @cp: the mycpudl max-heap context
+ * cpudl_find - find the best (later-dl) CPU in the system
+ * @cp: the cpudl max-heap context
  * @p: the task
  * @later_mask: a mask to fill in with the selected CPUs (or NULL)
  *
  * Returns: int - best CPU (heap maximum if suitable)
  */
-int mycpudl_find(struct mycpudl *cp, struct task_struct *p,
+int cpudl_find(struct cpudl *cp, struct task_struct *p,
 	       struct cpumask *later_mask)
 {
 	int best_cpu = -1;
@@ -111,9 +111,9 @@ int mycpudl_find(struct mycpudl *cp, struct task_struct *p,
 	    cpumask_and(later_mask, cp->free_cpus, tsk_cpus_allowed(p))) {
 		best_cpu = cpumask_any(later_mask);
 		goto out;
-	} else if (cpumask_test_cpu(mycpudl_maximum(cp), tsk_cpus_allowed(p)) &&
+	} else if (cpumask_test_cpu(cpudl_maximum(cp), tsk_cpus_allowed(p)) &&
 			dl_time_before(dl_se->deadline, cp->elements[0].dl)) {
-		best_cpu = mycpudl_maximum(cp);
+		best_cpu = cpudl_maximum(cp);
 		if (later_mask)
 			cpumask_set_cpu(best_cpu, later_mask);
 	}
@@ -125,8 +125,8 @@ out:
 }
 
 /*
- * mycpudl_set - update the mycpudl max-heap
- * @cp: the mycpudl max-heap context
+ * cpudl_set - update the cpudl max-heap
+ * @cp: the cpudl max-heap context
  * @cpu: the target cpu
  * @dl: the new earliest deadline for this cpu
  *
@@ -134,12 +134,12 @@ out:
  *
  * Returns: (void)
  */
-void mycpudl_set(struct mycpudl *cp, int cpu, u64 dl, int is_valid)
+void cpudl_set(struct cpudl *cp, int cpu, u64 dl, int is_valid)
 {
 	int old_idx, new_cpu;
 	unsigned long flags;
 
-	//WARN_ON(!cpu_present(cpu));
+	WARN_ON(!cpu_present(cpu));
 
 	raw_spin_lock_irqsave(&cp->lock, flags);
 	old_idx = cp->elements[cpu].idx;
@@ -159,9 +159,9 @@ void mycpudl_set(struct mycpudl *cp, int cpu, u64 dl, int is_valid)
 		cp->size--;
 		cp->elements[new_cpu].idx = old_idx;
 		cp->elements[cpu].idx = IDX_INVALID;
-		mycpudl_heapify_up(cp, old_idx);
+		cpudl_heapify_up(cp, old_idx);
 		cpumask_set_cpu(cpu, cp->free_cpus);
-                mycpudl_heapify_down(cp, old_idx);
+                cpudl_heapify_down(cp, old_idx);
 
 		goto out;
 	}
@@ -171,10 +171,10 @@ void mycpudl_set(struct mycpudl *cp, int cpu, u64 dl, int is_valid)
 		cp->elements[size1].dl = dl;
 		cp->elements[size1].cpu = cpu;
 		cp->elements[cpu].idx = size1;
-		mycpudl_heapify_up(cp, size1);
+		cpudl_heapify_up(cp, size1);
 		cpumask_clear_cpu(cpu, cp->free_cpus);
 	} else {
-		mycpudl_change_key(cp, old_idx, dl);
+		cpudl_change_key(cp, old_idx, dl);
 	}
 
 out:
@@ -182,30 +182,30 @@ out:
 }
 
 /*
- * mycpudl_set_freecpu - Set the mycpudl.free_cpus
- * @cp: the mycpudl max-heap context
+ * cpudl_set_freecpu - Set the cpudl.free_cpus
+ * @cp: the cpudl max-heap context
  * @cpu: rd attached cpu
  */
-void mycpudl_set_freecpu(struct mycpudl *cp, int cpu)
+void cpudl_set_freecpu(struct cpudl *cp, int cpu)
 {
 	cpumask_set_cpu(cpu, cp->free_cpus);
 }
 
 /*
- * mycpudl_clear_freecpu - Clear the mycpudl.free_cpus
- * @cp: the mycpudl max-heap context
+ * cpudl_clear_freecpu - Clear the cpudl.free_cpus
+ * @cp: the cpudl max-heap context
  * @cpu: rd attached cpu
  */
-void mycpudl_clear_freecpu(struct mycpudl *cp, int cpu)
+void cpudl_clear_freecpu(struct cpudl *cp, int cpu)
 {
 	cpumask_clear_cpu(cpu, cp->free_cpus);
 }
 
 /*
- * mycpudl_init - initialize the mycpudl structure
- * @cp: the mycpudl max-heap context
+ * cpudl_init - initialize the cpudl structure
+ * @cp: the cpudl max-heap context
  */
-int mycpudl_init(struct mycpudl *cp, int nr_cpu_ids)
+int cpudl_init(struct cpudl *cp)
 {
 	int i;
 
@@ -214,7 +214,7 @@ int mycpudl_init(struct mycpudl *cp, int nr_cpu_ids)
 	cp->size = 0;
 
 	cp->elements = kcalloc(nr_cpu_ids,
-			       sizeof(struct mycpudl_item),
+			       sizeof(struct cpudl_item),
 			       GFP_KERNEL);
 	if (!cp->elements)
 		return -ENOMEM;
@@ -224,17 +224,17 @@ int mycpudl_init(struct mycpudl *cp, int nr_cpu_ids)
 		return -ENOMEM;
 	}
 
-	for (i = 0; i < nr_cpu_ids; i++)
+	for_each_possible_cpu(i)
 		cp->elements[i].idx = IDX_INVALID;
 
 	return 0;
 }
 
 /*
- * mycpudl_cleanup - clean up the mycpudl structure
- * @cp: the mycpudl max-heap context
+ * cpudl_cleanup - clean up the cpudl structure
+ * @cp: the cpudl max-heap context
  */
-void mycpudl_cleanup(struct mycpudl *cp)
+void cpudl_cleanup(struct cpudl *cp)
 {
 	free_cpumask_var(cp->free_cpus);
 	kfree(cp->elements);
