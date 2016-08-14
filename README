@@ -65,4 +65,8 @@ In a set of runs performed on an Intel(R) Core(TM) i5-5200U CPU @ 2.20GHz,
 I've seen up to ~14% of average speed-up, e.g., with num_ops=100000 and up
 to 256 CPUs:
 
-  
+  https://github.com/tomcucinotta/cpudl-bench/blob/master/cpudl-100000.pdf
+
+and this is a similar prior measurement on a different laptop:
+
+  https://github.com/tomcucinotta/cpudl-bench/blob/master/cpudl.pdf
