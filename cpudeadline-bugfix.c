@@ -41,7 +41,7 @@ static void mycpudl_exchange(struct mycpudl *cp, int a, int b)
 	swap(cp->elements[cpu_a].idx, cp->elements[cpu_b].idx);
 }
 
-static void mycpudl_heapify_down(struct mycpudl *cp, int idx)
+static void mycpudl_heapify(struct mycpudl *cp, int idx)
 {
 	int l, r, largest;
 
@@ -66,25 +66,20 @@ static void mycpudl_heapify_down(struct mycpudl *cp, int idx)
 	}
 }
 
-static void mycpudl_heapify_up(struct mycpudl *cp, int idx)
-{
-	while (idx > 0 && dl_time_before(cp->elements[parent(idx)].dl,
-			cp->elements[idx].dl)) {
-		mycpudl_exchange(cp, idx, parent(idx));
-		idx = parent(idx);
-	}
-}
-
 static void mycpudl_change_key(struct mycpudl *cp, int idx, u64 new_dl)
 {
 	WARN_ON(idx == IDX_INVALID);
 
 	if (dl_time_before(new_dl, cp->elements[idx].dl)) {
 		cp->elements[idx].dl = new_dl;
-		mycpudl_heapify_down(cp, idx);
+		mycpudl_heapify(cp, idx);
 	} else {
 		cp->elements[idx].dl = new_dl;
-		mycpudl_heapify_up(cp, idx);
+		while (idx > 0 && dl_time_before(cp->elements[parent(idx)].dl,
+					cp->elements[idx].dl)) {
+			mycpudl_exchange(cp, idx, parent(idx));
+			idx = parent(idx);
+		}
 	}
 }
 
@@ -159,19 +154,24 @@ void mycpudl_set(struct mycpudl *cp, int cpu, u64 dl, int is_valid)
 		cp->size--;
 		cp->elements[new_cpu].idx = old_idx;
 		cp->elements[cpu].idx = IDX_INVALID;
-		mycpudl_heapify_up(cp, old_idx);
+		while (old_idx > 0 && dl_time_before(
+				cp->elements[parent(old_idx)].dl,
+				cp->elements[old_idx].dl)) {
+			mycpudl_exchange(cp, old_idx, parent(old_idx));
+			old_idx = parent(old_idx);
+		}
 		cpumask_set_cpu(cpu, cp->free_cpus);
-                mycpudl_heapify_down(cp, old_idx);
+                mycpudl_heapify(cp, old_idx);
 
 		goto out;
 	}
 
 	if (old_idx == IDX_INVALID) {
-		int size1 = cp->size++;
-		cp->elements[size1].dl = dl;
-		cp->elements[size1].cpu = cpu;
-		cp->elements[cpu].idx = size1;
-		mycpudl_heapify_up(cp, size1);
+		cp->size++;
+		cp->elements[cp->size - 1].dl = dl;
+		cp->elements[cp->size - 1].cpu = cpu;
+		cp->elements[cpu].idx = cp->size - 1;
+		mycpudl_change_key(cp, cp->size - 1, dl);
 		cpumask_clear_cpu(cpu, cp->free_cpus);
 	} else {
 		mycpudl_change_key(cp, old_idx, dl);

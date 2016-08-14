@@ -22,7 +22,7 @@ set size 0.97,0.3
 set origin 0.03,0
 
 set ylabel "Speed-up (%)"
-set ytics 2
+#set ytics 2
 unset xlabel
 
 plot [2:] \

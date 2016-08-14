@@ -35,6 +35,10 @@ static void dump_heap(struct mycpudl *cp) {
 	printk("ERROR: elems[%d].idx=%d but elems[%d].cpu=%d\n", i, idx, idx, cp->elements[idx].cpu);
     }
   }
+  for (i = 1; i < cp->size; i++) {
+    if (dl_time_before(cp->elements[(i-1)>>1].dl, cp->elements[i].dl))
+      printk("ERROR: elems[%d].dl=%Lu before elems[%d].dl=%Lu\n", (i-1)>>1, cp->elements[(i-1)>>1].dl, i, cp->elements[i].dl);
+  }
   if (size != cp->size)
     printk("ERROR: size=%d but cp->size=%d\n", size, cp->size);
 }
@@ -92,7 +96,6 @@ static void mycpudl_heapify(struct mycpudl *cp, int idx)
 
 static void mycpudl_change_key(struct mycpudl *cp, int idx, u64 new_dl)
 {
-	//WARN_ON(idx == IDX_INVALID || !cpu_present(idx));
 	WARN_ON(idx == IDX_INVALID);
 
 	if (dl_time_before(new_dl, cp->elements[idx].dl)) {
@@ -139,8 +142,7 @@ int mycpudl_find(struct mycpudl *cp, struct task_struct *p,
 	}
 
 out:
-	//WARN_ON(best_cpu != -1 && !cpu_present(best_cpu));
-	WARN_ON(best_cpu != -1);
+	WARN_ON(best_cpu != -1 && !cpu_present(best_cpu));
 
 	return best_cpu;
 }
@@ -205,6 +207,7 @@ void mycpudl_set(struct mycpudl *cp, int cpu, u64 dl, int is_valid)
 
 out:
 	raw_spin_unlock_irqrestore(&cp->lock, flags);
+
 #ifdef __TOM__
 	dump_heap(cp);
 #endif
@@ -253,9 +256,9 @@ int mycpudl_init(struct mycpudl *cp, int nr_cpu_ids)
 		return -ENOMEM;
 	}
 
-	//for_each_possible_cpu(i)
 	for (i = 0; i < nr_cpu_ids; i++)
 		cp->elements[i].idx = IDX_INVALID;
+
 #ifdef __TOM__
 	num_cpus = nr_cpu_ids;
 	dump_heap(cp);

@@ -22,14 +22,18 @@ static __inline__ unsigned long long tick(void)
 
 static struct mycpudl _cpudl;
 
+#define dl_range 0x7fffffffull
+static u64 dl_base  = 0x8000000000000000ull - dl_range/2;
+//static u64 dl_base  = 0;
+
 static int cpudl_bench_init(void)
 {
    int i;
    long long beg, t1;
-   u64 dl = 123456789;
+   u64 r = 123456789;
    int inserts = 0;
 
-   printk("init: num_cpus=%d num_ops=%d\n", num_cpus, num_ops);
+   printk("init: num_cpus=%d num_ops=%d, dl_base=%Lu,dl_range=%Lu\n", num_cpus, num_ops, dl_base, dl_range);
 
    if (mycpudl_init(&_cpudl, num_cpus) != 0) {
      printk("mycpudl_init() failed!\n");
@@ -44,15 +48,16 @@ static int cpudl_bench_init(void)
 
    beg = tick();
    for (i = 0; i < num_ops; i++) {
-     if ((dl & 5) != 5) {
-       printk("%d set: %d %Lu\n", i, (i % num_cpus), dl);
+     u64 dl = dl_base + r % dl_range;
+     if ((r & 5) != 5) {
+       //printk("%d set: %d %Lu\n", i, (i % num_cpus), dl);
        mycpudl_set(&_cpudl, i % num_cpus, dl, 1);
        inserts++;
      } else {
-       printk("%d clr: %d\n", i, (i % num_cpus));
+       //printk("%d clr: %d\n", i, (i % num_cpus));
        mycpudl_set(&_cpudl, i % num_cpus, 0, 0);
      }
-     dl = dl * 1103515245 + 7917;
+     r = r * 1103515245ull + 7917ull;
      times[i] = tick();
    }
 

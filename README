@@ -1,10 +1,12 @@
-cpudl-bench - Modules to benchmark heap operations in kernel/sched/cpudeadline.c
+cpudl-bench - Modules to benchmark/test sched/deadline heap operations
               by Tommaso Cucinotta <tommaso.cucinotta@sssup.it>
 
 This project compiles into a set of modules that benchmark heap operations
-in kernel/sched/cpudeadline.c. Each benchmarking module contains a copy of
-some version of the cpudeadline.c source, after a few modifications as
-described below.
+in kernel/sched/cpudeadline.c and are also useful for debugging purposes,
+to check that the changes do not result in a change in behavior, as well
+as performing checks on the heap health/consistency and invariant preservation.
+Each benchmarking module contains a copy of some version of the cpudeadline.c
+source, after a few modifications as described below.
 
 Applied changes are:
 1. change all identifiers prefixes from cpudl_ to mycpudl_ (to avoid conflicts
@@ -30,3 +32,37 @@ d. at the end of the num_ops measurements, dumps the whole content of the
 
 Due to the last step, the module needs a large in-kernel ring buffer, if a large
 num_ops module param is used.
+
+The cpudeadline*-debug.c files, along with the *debug.ko modules variant, are
+used to double-check that, step by step, the heap produced by the *-fast
+version is exactly the same as the one produced by the original code.
+The check can be done by diff-ing the dmesg output after insertion of the
+*-fast.ko module vs the original one.
+
+When running these tests for benchmarking, I recommend:
+
+0. increase the in-kernel ring buffer:
+   add log_buf_len=67108864 as kernel param at boot
+
+1. exit the X11 environment:
+   /etc/init.d/lightdm stop
+
+2. stop the NetworkManager:
+   /etc/init.d/network-manager stop
+
+3. block the CPU frequency at the maximum allowed one:
+   for c in $(seq 0 $[$(grep -c processor /proc/cpuinfo) - 1]); do
+     sudo cpufreq-set -c $c -g performance;
+   done
+
+4. load the module cpudl-bugfix.ko, save the dmesg output and unload it
+
+5. load the module cpudl-bugfix-fast.ko, save the dmesg output and unload it
+
+6. process and compare the obtained dmesg outputs
+
+In a set of runs performed on an Intel(R) Core(TM) i5-5200U CPU @ 2.20GHz,
+I've seen up to ~14% of average speed-up, e.g., with num_ops=100000 and up
+to 256 CPUs:
+
+  

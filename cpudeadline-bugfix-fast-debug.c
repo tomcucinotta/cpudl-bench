@@ -35,6 +35,10 @@ static void dump_heap(struct mycpudl *cp) {
 	printk("ERROR: elems[%d].idx=%d but elems[%d].cpu=%d\n", i, idx, idx, cp->elements[idx].cpu);
     }
   }
+  for (i = 1; i < cp->size; i++) {
+    if (dl_time_before(cp->elements[(i-1)>>1].dl, cp->elements[i].dl))
+      printk("ERROR: elems[%d].dl=%Lu before elems[%d].dl=%Lu\n", (i-1)>>1, cp->elements[(i-1)>>1].dl, i, cp->elements[i].dl);
+  }
   if (size != cp->size)
     printk("ERROR: size=%d but cp->size=%d\n", size, cp->size);
 }
@@ -73,11 +77,13 @@ static void mycpudl_heapify_down(struct mycpudl *cp, int idx)
 		largest = idx;
 		largest_dl = orig_dl;
 
-		if ((l < cp->size) && dl_time_before(orig_dl, cp->elements[l].dl)) {
+		if ((l < cp->size) && dl_time_before(orig_dl,
+						cp->elements[l].dl)) {
 			largest = l;
 			largest_dl = cp->elements[l].dl;
 		}
-		if ((r < cp->size) && dl_time_before(largest_dl, cp->elements[r].dl))
+		if ((r < cp->size) && dl_time_before(largest_dl,
+						cp->elements[r].dl))
 			largest = r;
 
 		if (largest == idx)
@@ -95,7 +101,7 @@ static void mycpudl_heapify_down(struct mycpudl *cp, int idx)
 	cp->elements[cp->elements[idx].cpu].idx = idx;
 }
 
-static int mycpudl_heapify_up(struct mycpudl *cp, int idx)
+static void mycpudl_heapify_up(struct mycpudl *cp, int idx)
 {
 	int p;
 
@@ -103,10 +109,12 @@ static int mycpudl_heapify_up(struct mycpudl *cp, int idx)
 	u64 orig_dl = cp->elements[idx].dl;
 
 	if (idx == 0)
-		return idx;
+		return;
 
 	do {
 		p = parent(idx);
+		printk("orig: cpu=%d, dl=%Lu; idx=%d: cpu=%d, dl=%Lu; p=%d: cpu=%d, dl=%Lu\n",
+		       orig_cpu, orig_dl, idx, cp->elements[idx].cpu, cp->elements[idx].dl, p, cp->elements[p].cpu, cp->elements[p].dl);
 		if (dl_time_before(orig_dl, cp->elements[p].dl))
 			break;
 		/* pull parent onto idx */
@@ -119,21 +127,17 @@ static int mycpudl_heapify_up(struct mycpudl *cp, int idx)
 	cp->elements[idx].cpu = orig_cpu;
 	cp->elements[idx].dl = orig_dl;
 	cp->elements[cp->elements[idx].cpu].idx = idx;
-	return idx;
 }
 
 static void mycpudl_heapify(struct mycpudl *cp, int idx)
 {
-	//WARN_ON(idx == IDX_INVALID || !cpu_present(idx));
-	WARN_ON(idx == IDX_INVALID);
-	if (idx == IDX_INVALID)
-		return;
+	BUG_ON(idx == IDX_INVALID);
 
-	if (idx > 0 && dl_time_before(cp->elements[parent(idx)].dl, cp->elements[idx].dl)) {
+	if (idx > 0 && dl_time_before(cp->elements[parent(idx)].dl,
+				cp->elements[idx].dl))
 		mycpudl_heapify_up(cp, idx);
-	} else {
+	else
 		mycpudl_heapify_down(cp, idx);
-	}
 }
 
 static inline int mycpudl_maximum(struct mycpudl *cp)
@@ -168,7 +172,6 @@ int mycpudl_find(struct mycpudl *cp, struct task_struct *p,
 
 out:
 	WARN_ON(best_cpu != -1 && !cpu_present(best_cpu));
-	WARN_ON(best_cpu != -1);
 
 	return best_cpu;
 }
@@ -199,22 +202,18 @@ void mycpudl_clear(struct mycpudl *cp, int cpu)
 		 * called for a CPU without -dl tasks running.
 		 */
 	} else {
-		/* remove item */
+		new_cpu = cp->elements[cp->size - 1].cpu;
+		cp->elements[old_idx].dl = cp->elements[cp->size - 1].dl;
+		cp->elements[old_idx].cpu = new_cpu;
 		cp->size--;
+		cp->elements[new_cpu].idx = old_idx;
 		cp->elements[cpu].idx = IDX_INVALID;
-		if (old_idx != cp->size) {
-			new_cpu = cp->elements[cp->size].cpu;
-			cp->elements[old_idx].dl = cp->elements[cp->size].dl;
-			cp->elements[old_idx].cpu = new_cpu;
-			cp->elements[new_cpu].idx = old_idx;
-			//mycpudl_heapify(cp, old_idx);
-			old_idx = mycpudl_heapify_up(cp, old_idx);
-			mycpudl_heapify_down(cp, old_idx);
-		}
+		mycpudl_heapify(cp, old_idx);
+
 		cpumask_set_cpu(cpu, cp->free_cpus);
 	}
-
 	raw_spin_unlock_irqrestore(&cp->lock, flags);
+
 #ifdef __TOM__
 	dump_heap(cp);
 #endif
@@ -241,26 +240,19 @@ void mycpudl_set(struct mycpudl *cp, int cpu, u64 dl)
 
 	old_idx = cp->elements[cpu].idx;
 	if (old_idx == IDX_INVALID) {
-		int sz1 = cp->size++;
-		cp->elements[sz1].dl = dl;
-		cp->elements[sz1].cpu = cpu;
-		cp->elements[cpu].idx = sz1;
-		mycpudl_heapify_up(cp, sz1);
-
+		int new_idx = cp->size++;
+		cp->elements[new_idx].dl = dl;
+		cp->elements[new_idx].cpu = cpu;
+		cp->elements[cpu].idx = new_idx;
+		mycpudl_heapify_up(cp, new_idx);
 		cpumask_clear_cpu(cpu, cp->free_cpus);
 	} else {
-		//cp->elements[old_idx].dl = dl;
-		//mycpudl_heapify(cp, old_idx);
-		if (dl_time_before(dl, cp->elements[old_idx].dl)) {
-			cp->elements[old_idx].dl = dl;
-			mycpudl_heapify_down(cp, old_idx);
-		} else {
-			cp->elements[old_idx].dl = dl;
-			mycpudl_heapify_up(cp, old_idx);
-		}
+		cp->elements[old_idx].dl = dl;
+		mycpudl_heapify(cp, old_idx);
 	}
 
 	raw_spin_unlock_irqrestore(&cp->lock, flags);
+
 #ifdef __TOM__
 	dump_heap(cp);
 #endif
@@ -309,9 +301,9 @@ int mycpudl_init(struct mycpudl *cp, int nr_cpu_ids)
 		return -ENOMEM;
 	}
 
-	//for_each_possible_cpu(i)
 	for (i = 0; i < nr_cpu_ids; i++)
 		cp->elements[i].idx = IDX_INVALID;
+
 #ifdef __TOM__
 	num_cpus = nr_cpu_ids;
 	dump_heap(cp);
